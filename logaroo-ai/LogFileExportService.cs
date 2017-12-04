@@ -3,16 +3,12 @@ using Microsoft.ApplicationInsights.DataContracts;
 using Microsoft.ApplicationInsights.Extensibility;
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Configuration;
-using System.Data;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.ServiceProcess;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 
 namespace logaroo_ai
 {
@@ -26,14 +22,21 @@ namespace logaroo_ai
         }
 
         protected override void OnStart(string[] args)
-        {            
+        {
             TelemetryConfiguration.Active.InstrumentationKey = ConfigurationManager.AppSettings["aiKey"].ToString();
+            //TODO: multiple path support
             string fswPath = ConfigurationManager.AppSettings["FileSystemWatcherFolder"].ToString();
+            //TODO: multiple filter support
             string fswFilter = ConfigurationManager.AppSettings["FileSystemWatcherFilter"].ToString();
 
             TelemetryClient tc = new TelemetryClient();
-            var props = new Dictionary<string, string> { { "test", "test" } };
-            tc.TrackEvent("ConsoleAppStart", props, null);
+            var props = new Dictionary<string, string>
+            {
+                { "FileSystemWatcherFolder", fswPath },
+                { "FileSystemWatcherFilter", fswFilter },
+            };
+
+            tc.TrackEvent("OnStart: LogFileExportService has been activated.", props, null);
 
             FileSystemWatcher fsw = new FileSystemWatcher();
             fsw.Path = fswPath;
@@ -48,11 +51,60 @@ namespace logaroo_ai
 
         }
 
+        /// <summary>
+        /// Parsing logic which consumes entire file and writes it to application insights.  Tightly coupled to default log4net file format.
+        /// </summary>
+        /// <param name="source">File System Watcher publishing event</param>
+        /// <param name="e">The event containing whichever NotifyFilter data present on configured File System Watcher.</param>
+        /// <example>
+        /// MyLogFile.log
+        /// 2017-11-17 07:49:29,768 [40] INFO MyTestService [MyTestService] - Stopping queue handler. [Thread ID: 16]
+        /// 2017-11-17 07:49:29,768 [40] INFO MyTestService [MyTestService] - Stopping queue handler. [Thread ID: 9]
+        /// 2017-11-21 13:37:46,780 [32] INFO MyTestService [MyTestService] - UniqueID: 0000000-0000-0000-0000-000000000000
+        ///        Mode    : SendStart
+        ///        Message : UniqueID : 0000000-0000-0000-0000-000000000000
+        ///        Path     : FormatName:DIRECT=OS:MyServer\MyQueue
+        ///        AdminPath: 
+        ///        Label    : 002184724
+        ///        -- Data -- 
+        ///        NameSpace.MyProject.MyClass
+        ///        -- Args --
+        ///        
+        /// 2017-11-21 13:37:46,733 [32] INFO  MyTestService [MyTestService] - Requesting test from Primary source. [MyTest: 1234]
+        /// 
+        /// Telemetries Produced:
+        /// { 
+        ///  Message: "2017-11-17 07:49:29,768 [40] INFO MyTestService [MyTestService] - Stopping queue handler. [Thread ID: 16]",
+        ///  SeverityLevel: 1
+        /// }
+        /// { 
+        ///  Message: "2017-11-17 07:49:29,768 [40] INFO MyTestService [MyTestService] - Stopping queue handler. [Thread ID: 9]",
+        ///  SeverityLevel: 1
+        /// }
+        /// { 
+        ///  Message: "2017-11-21 13:37:46,780 [32] INFO MyTestService [MyTestService] - UniqueID: 0000000-0000-0000-0000-000000000000
+        ///        Mode    : SendStart
+        ///        Message : UniqueID : 0000000-0000-0000-0000-000000000000
+        ///        Path     : FormatName:DIRECT=OS:MyServer\MyQueue
+        ///        AdminPath: 
+        ///        Label    : 002184724
+        ///        -- Data -- 
+        ///        NameSpace.MyProject.MyClass
+        ///        -- Args --",
+        ///  SeverityLevel: 1
+        /// }
+        /// { 
+        ///  Message: "2017-11-21 13:37:46,733 [32] INFO  MyTestService [MyTestService] - Requesting test from Primary source. [MyTest: 1234]",
+        ///  SeverityLevel: 1
+        /// }
+        /// 
+        /// </example>
+        /// 
         private void LogFileOnCreated(object source, FileSystemEventArgs e)
-        {            
-            Microsoft.ApplicationInsights.TelemetryClient tc = new TelemetryClient();
+        {
+            TelemetryClient tc = new TelemetryClient();
             var lines = File.ReadAllLines($"{e.FullPath}.1").ToList();
-            
+
             StringBuilder sb = new StringBuilder();
             SeverityLevel currentSevLevel = SeverityLevel.Verbose;
 
@@ -65,7 +117,9 @@ namespace logaroo_ai
                     // if third split matches thread number regex it's most likely the first line of a log message
                     if (sb.Length > 0 && splits.Length >= 3 && threadNumberRegex.IsMatch(splits[2]))
                     {
-                        //send sb
+                        //TODO: add timestamp to trace telemetry
+
+                        //send sb                        
                         tc.TrackTrace(sb.ToString(), currentSevLevel);
 
                         sb.Clear();
