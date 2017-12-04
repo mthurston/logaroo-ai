@@ -36,6 +36,7 @@
       <HintPath>packages\Microsoft.ApplicationInsights.2.4.0\lib\net46\Microsoft.ApplicationInsights.dll</HintPath>
     </Reference>
     <Reference Include="System" />
+    <Reference Include="System.Configuration" />
     <Reference Include="System.Core" />
     <Reference Include="System.Diagnostics.DiagnosticSource, Version=4.0.2.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
       <HintPath>packages\System.Diagnostics.DiagnosticSource.4.4.0\lib\net46\System.Diagnostics.DiagnosticSource.dll</HintPath>
@@ -49,12 +50,11 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Models\CustomFolderSettings.cs" />
-    <Compile Include="Service1.cs">
+    <Compile Include="LogFileExportService.cs">
       <SubType>Component</SubType>
     </Compile>
-    <Compile Include="Service1.Designer.cs">
-      <DependentUpon>Service1.cs</DependentUpon>
+    <Compile Include="LogFileExportService.Designer.cs">
+      <DependentUpon>LogFileExportService.cs</DependentUpon>
     </Compile>
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

@@ -1,6 +1,6 @@
 ﻿namespace logaroo_ai
 {
-    partial class Service1
+    partial class LogFileExportService
     {
         /// <summary> 
         /// Required designer variable.
