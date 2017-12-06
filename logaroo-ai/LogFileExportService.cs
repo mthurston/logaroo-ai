@@ -120,18 +120,18 @@ namespace logaroo_ai
 
                 try
                 {
-                    using (var csv = new FileStream(e.FullPath, FileMode.Open, FileAccess.Read, FileShare.Delete | FileShare.ReadWrite))
-                    using (var sr = new StreamReader(csv))
+                    using (var fileStream = new FileStream(e.FullPath, FileMode.Open, FileAccess.Read, FileShare.Delete | FileShare.ReadWrite))
+                    using (var reader = new StreamReader(fileStream))
                     {
-                        for (int i = 0; i < currentLineNumber && !sr.EndOfStream; i++)
+                        for (int i = 0; i < currentLineNumber && !reader.EndOfStream; i++)
                         {
                             //progress to currentLine
-                            sr.ReadLine();
+                            reader.ReadLine();
                         }
 
-                        while (!sr.EndOfStream)
+                        while (!reader.EndOfStream)
                         {
-                            string currentLine = sr.ReadLine();
+                            string currentLine = reader.ReadLine();
                             currentLineNumber++;
 
                             try
