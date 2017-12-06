@@ -1,6 +1,7 @@
 ﻿using Microsoft.ApplicationInsights;
 using Microsoft.ApplicationInsights.DataContracts;
 using Microsoft.ApplicationInsights.Extensibility;
+using Microsoft.Win32.SafeHandles;
 using System;
 using System.Collections.Generic;
 using System.Configuration;
@@ -9,12 +10,14 @@ using System.Linq;
 using System.ServiceProcess;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace logaroo_ai
 {
     public partial class LogFileExportService : ServiceBase
     {
         private static readonly Regex threadNumberRegex = new Regex(@"\[[0-9]+]");
+        private long currentLineNumber = 0;
 
         public LogFileExportService()
         {
@@ -40,9 +43,10 @@ namespace logaroo_ai
 
             FileSystemWatcher fsw = new FileSystemWatcher();
             fsw.Path = fswPath;
-            fsw.NotifyFilter = NotifyFilters.CreationTime | NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName;
+            fsw.NotifyFilter = NotifyFilters.LastAccess | NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName;
             fsw.Filter = fswFilter;
-            fsw.Created += new FileSystemEventHandler(LogFileOnCreated);
+            fsw.Changed += new FileSystemEventHandler(LogFileOnChanged);
+            fsw.Renamed += new RenamedEventHandler(LogFileOnRenamed);
             fsw.EnableRaisingEvents = true;
         }
 
@@ -100,66 +104,109 @@ namespace logaroo_ai
         /// 
         /// </example>
         /// 
-        private void LogFileOnCreated(object source, FileSystemEventArgs e)
+        private void LogFileOnChanged(object source, FileSystemEventArgs e)
         {
-            TelemetryClient tc = new TelemetryClient();
-            var lines = File.ReadAllLines($"{e.FullPath}.1").ToList();
-
-            StringBuilder sb = new StringBuilder();
-            SeverityLevel currentSevLevel = SeverityLevel.Verbose;
-
-            for (int i = 0; i < lines.Count; i++)
+            if (e.ChangeType == WatcherChangeTypes.Deleted || 
+                e.ChangeType == WatcherChangeTypes.Renamed ||
+                !File.Exists(e.FullPath))
             {
+                ResetFile();
+            }
+            else
+            {
+                TelemetryClient tc = new TelemetryClient();
+                StringBuilder sb = new StringBuilder();
+                SeverityLevel currentSevLevel = SeverityLevel.Verbose;
+
                 try
                 {
-                    var splits = lines[i].Split(' ');
-
-                    // if third split matches thread number regex it's most likely the first line of a log message
-                    if (sb.Length > 0 && splits.Length >= 3 && threadNumberRegex.IsMatch(splits[2]))
+                    using (var csv = new FileStream(e.FullPath, FileMode.Open, FileAccess.Read, FileShare.Delete | FileShare.ReadWrite))
+                    using (var sr = new StreamReader(csv))
                     {
-                        //TODO: add timestamp to trace telemetry
-
-                        //send sb                        
-                        tc.TrackTrace(sb.ToString(), currentSevLevel);
-
-                        sb.Clear();
-                    }
-
-                    // if third split matches thread number regex the fourth split is sev level
-                    if (splits.Length >= 4 && threadNumberRegex.IsMatch(splits[2]))
-                    {
-                        switch (splits[3])
+                        for (int i = 0; i < currentLineNumber && !sr.EndOfStream; i++)
                         {
-                            case "INFO":
-                                currentSevLevel = SeverityLevel.Information;
-                                break;
-                            case "WARNING":
-                                currentSevLevel = SeverityLevel.Warning;
-                                break;
-                            case "CRITICAL":
-                                currentSevLevel = SeverityLevel.Critical;
-                                break;
-                            case "ERROR":
-                                currentSevLevel = SeverityLevel.Error;
-                                break;
-                            default:
-                                currentSevLevel = SeverityLevel.Verbose;
-                                break;
+                            //progress to currentLine
+                            sr.ReadLine();
+                        }
+
+                        while (!sr.EndOfStream)
+                        {
+                            string currentLine = sr.ReadLine();
+                            currentLineNumber++;
+
+                            try
+                            {
+                                var splits = currentLine.Split(' ');
+
+                                // if third split matches thread number regex it's most likely the first line of a log message
+                                if (sb.Length > 0 && splits.Length >= 3 && threadNumberRegex.IsMatch(splits[2]))
+                                {
+                                    //send sb                        
+                                    tc.TrackTrace(sb.ToString(), currentSevLevel);
+                                    sb.Clear();
+                                }
+
+                                // if third split matches thread number regex the fourth split is sev level
+                                if (splits.Length >= 4 && threadNumberRegex.IsMatch(splits[2]))
+                                {
+                                    GetSeverityLevel(splits[3]);
+                                }
+
+                                sb.AppendLine(currentLine);
+                            }
+                            catch (Exception ex)
+                            {
+                                tc.TrackException(ex, new Dictionary<string, string>()
+                            {
+                                { "Source", "Log Parsing Logic (Inner)" },
+                                { "Log Line", currentLine ?? "UNSPECIFIED" },
+                                { "Log File Path", e?.FullPath ?? "UNKNOWN" }
+                            });
+                            }
                         }
                     }
-
-                    sb.AppendLine(lines[i]);
                 }
                 catch (Exception ex)
                 {
                     tc.TrackException(ex, new Dictionary<string, string>()
-                    {
-                        { "Source", "Log Parsing Logic" },
-                        { "Log Line Number", i.ToString() ?? "UNKNOWN"},
-                        { "Log File Path", e?.FullPath ?? "UNKNOWN" }
-                    });
+                {
+                    { "Source", "Log Parsing Logic (Outer)" },
+                    { "Log File Path", e?.FullPath ?? "UNKNOWN" }
+                });
                 }
+            }            
+        }
+
+        private void LogFileOnRenamed(object source, RenamedEventArgs e)
+        {
+            ResetFile();
+        }
+
+        private SeverityLevel GetSeverityLevel(string sevLevel)
+        {
+            switch (sevLevel)
+            {
+                case "INFO":
+                    return SeverityLevel.Information;
+                    break;
+                case "WARNING":
+                    return SeverityLevel.Warning;
+                    break;
+                case "CRITICAL":
+                    return SeverityLevel.Critical;
+                    break;
+                case "ERROR":
+                    return SeverityLevel.Error;
+                    break;
+                default:
+                    return SeverityLevel.Verbose;
+                    break;
             }
+        }
+
+        private void ResetFile()
+        {
+            currentLineNumber = 0;
         }
     }
 }
